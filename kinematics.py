@@ -8,6 +8,13 @@ def link_transform(theta, a, d):
                   [0, 0, 0, 1]])
     return T
 
+def pose_from_matrix(T):
+    x = T[0, 3]
+    y = T[1, 3]
+    z = T[2, 3]
+    gamma = np.arctan2(T[1, 0], T[0, 0])   # cos/sin of the accumulated angle
+    return x, y, z, gamma
+
 def forward_kinematics(thetas, h1):
     T_0_t = (
         link_transform(0, 0, h1) #lift elevator (prismatic)
