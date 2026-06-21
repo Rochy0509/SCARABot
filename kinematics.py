@@ -33,7 +33,9 @@ def joint_positions(thetas, h1):
     P_3 = (((D2*np.cos(thetas[0]))+(D3*np.cos(thetas[0] + thetas[1])) + (D4*np.cos(thetas[0] + thetas[1] + thetas[2]))), 
            ((D2*np.sin(thetas[0])) + (D3*np.sin(thetas[0] + thetas[1])) + (D4*np.sin(thetas[0] + thetas[1] + thetas[2])))) #tool
 
-    return np.array([P_0, P_1, P_2, P_3])
+    xy = np.array([P_0, P_1, P_2, P_3])
+    z = np.array([h1, h1 + H2, h1 + H2 + H3, h1 + H2 + H3])
+    return np.column_stack([xy, z])
 
 def inverse_kinematics(x, y, z, gamma):
     h1 = z - H2 - H3 #lift elevator position
@@ -41,7 +43,9 @@ def inverse_kinematics(x, y, z, gamma):
     W_y = y - (D4*np.sin(gamma)) #wrist y
 
     # law of cosines on the triangle
-    cos_theta2 = (W_x**2 + W_y**2 - D2**2 - D3**2) / (2*D2*D3) #
+    cos_theta2 = (W_x**2 + W_y**2 - D2**2 - D3**2) / (2*D2*D3)
+    if abs(cos_theta2) > 1 + 1e-9:
+        return []
     cos_theta2 = np.clip(cos_theta2, -1.0, 1.0) # clamp so float overshoot at full reach can't NaN the sqrt
     sin_theta2 = np.sqrt(1 - cos_theta2**2) # matching sine magnitude;
 
