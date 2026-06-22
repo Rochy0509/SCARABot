@@ -1,6 +1,6 @@
 import numpy as np
-from kinematics import forward_kinematics, inverse_kinematics, joint_positions, pose_from_matrix
-from config import D2, D3, D4
+from kinematics import forward_kinematics, inverse_kinematics, pose_from_matrix
+from config import D2, D3, D4, H2, H3, MAX_LIFT
 
 def interpolate_joint(start_config, target_config, steps):
     start_config = np.array(start_config)
@@ -63,3 +63,13 @@ def choose_trajectory(start_config, target_pose, steps, threshold):
     return joint, "joint-space solution found!"
 
   
+def sample_target_poses(n, seed=None):
+    rng = np.random.default_rng(seed)
+    r_min = abs(D2 - D3) + D4
+    r_max = D2 + D3 + D4
+    r   = rng.uniform(r_min, r_max, n)
+    phi = rng.uniform(-np.pi, np.pi, n)
+    z   = rng.uniform(H2 + H3, MAX_LIFT + H2 + H3, n)
+    x = r * np.cos(phi)
+    y = r * np.sin(phi)
+    return np.column_stack([x, y, z, phi])
