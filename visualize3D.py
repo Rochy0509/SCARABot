@@ -4,9 +4,13 @@ from matplotlib.widgets import Slider, Button, TextBox
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 
-from kinematics import joint_positions
-from planning import choose_trajectory, sample_target_poses
+from kinematics import joint_positions, inverse_kinematics
+from planning import choose_trajectory, sample_target_poses, nearest_branch
 from config import D2, D3, D4, H2, H3, MAX_LIFT
+
+from world import sample_obstacles
+from collision import is_colliding
+
 
 STEPS = 10
 THRESHOLD = 0.1
@@ -24,12 +28,16 @@ s_theta3 = None
 s_h1 = None
 tb_n = None
 tb_seed = None
+tb_obs = None   
 
 # Initialize global state variables
 current_config = (0.0, np.pi, -np.pi, 0.0) # (theta1, theta2, theta3, h1)
 anim = None
 trail = None
 target_marker = None
+
+obstacles = np.empty((0, 4))  
+obstacle_artists = []         
 
 def setup_scene():
     fig = plt.figure(figsize=(8,8))
@@ -65,6 +73,40 @@ def draw_config(config):
 
     fig.canvas.draw_idle()
 
+def draw_obstacles():
+    global obstacle_artists
+    for art in obstacle_artists:
+        art.remove()
+    obstacle_artists = []
+    u = np.linspace(0, 2 * np.pi, 16)
+    v = np.linspace(0, np.pi, 8)
+    for cx, cy, cz, r in obstacles:
+        xs = cx + r * np.outer(np.cos(u), np.sin(v))
+        ys = cy + r * np.outer(np.sin(u), np.sin(v))
+        zs = cz + r * np.outer(np.ones_like(u), np.cos(v))
+        art = ax.plot_surface(xs, ys, zs, color="0.5", alpha=0.3, linewidth=0)
+        obstacle_artists.append(art)
+    fig.canvas.draw_idle()
+
+def draw_config(config):
+    pts = joint_positions(config[:3], config[3])
+    bones.set_data_3d(pts[:, 0], pts[:, 1], pts[:, 2])
+    carriage.set_data_3d([0], [0], [config[3]])
+    bones.set_color("red" if is_colliding(config, obstacles) else "C0")
+    fig.canvas.draw_idle()
+
+def on_obstacles(event):
+    global obstacles
+    try:
+        n_obs = int(tb_obs.text)
+    except ValueError:
+        return
+    seed_txt = tb_seed.text.strip()
+    seed = int(seed_txt) if seed_txt else None
+    obstacles = sample_obstacles(n_obs, seed=seed)
+    draw_obstacles()
+    on_slider(None)    
+
 def on_slider(val):
     config = (
         *np.radians([s_theta1.val, s_theta2.val, s_theta3.val]),
@@ -72,19 +114,26 @@ def on_slider(val):
     )
     draw_config(config)
 
-def build_tour(start_config, poses):
-    """Chain choose_trajectory through every sampled pose into one trajectory."""
+def build_tour(start_config, poses, obstacles=None):
     legs = []
     config = start_config
     for pose in poses:
-        traj, _ = choose_trajectory(config, tuple(pose), STEPS, THRESHOLD)
-        if traj is None:
-            continue                       
+        solutions = inverse_kinematics(*tuple(pose))
+        if not solutions:
+            continue
+        target_config = nearest_branch(solutions, config)
+        if is_colliding(target_config, obstacles):
+            continue                                   
+
+        traj, mode = choose_trajectory(config, tuple(pose), STEPS, THRESHOLD, obstacles)
+        if traj is None:                               
+            continue
         legs.append(traj)
         config = tuple(traj[-1])
+
     if not legs:
         return None, start_config
-    return np.vstack(legs), config         # (n*STEPS, 4)
+    return np.vstack(legs), config
 
 def on_run(event):
     global anim, current_config
@@ -101,7 +150,7 @@ def on_run(event):
     poses = sample_target_poses(n, seed)
     target_marker.set_data_3d(poses[:, 0], poses[:, 1], poses[:, 2])
 
-    trajectory, current_config = build_tour(current_config, poses)
+    trajectory, current_config = build_tour(current_config, poses, obstacles)
     if trajectory is None:
         ax.set_title("no reachable targets"); fig.canvas.draw_idle(); return
 
@@ -123,7 +172,7 @@ def on_run(event):
 
 def launch():
     global fig, ax, bones, carriage, target_marker, trail
-    global s_theta1, s_theta2, s_theta3, s_h1, tb_n, tb_seed
+    global s_theta1, s_theta2, s_theta3, s_h1, tb_n, tb_seed, tb_obs
 
     fig, ax, bones, carriage, target_marker, trail = setup_scene()
 
@@ -133,7 +182,7 @@ def launch():
     ax_t3 = fig.add_axes([0.25, 0.10, 0.55, 0.03])
     ax_h1 = fig.add_axes([0.25, 0.05, 0.55, 0.03])
 
-    s_theta1 = Slider(ax_t1, "θ1 (deg)", -180, 180, valinit=0)
+    s_theta1 = Slider(ax_t1, "θ1 (deg)", -90, 90, valinit=0)
     s_theta2 = Slider(ax_t2, "θ2 (deg)", -180, 180, valinit=180)
     s_theta3 = Slider(ax_t3, "θ3 (deg)", -180, 180, valinit=-180)
     s_h1     = Slider(ax_h1, "h1 (lift)", 0, MAX_LIFT, valinit=MAX_LIFT * 0.4)
@@ -142,9 +191,12 @@ def launch():
         s.on_changed(on_slider)
 
     # sampler controls
-    tb_n    = TextBox(fig.add_axes([0.30, 0.94, 0.10, 0.045]), "points ", initial="8")
-    tb_seed = TextBox(fig.add_axes([0.55, 0.94, 0.10, 0.045]), "seed ",   initial="0")
-    btn_run = Button(fig.add_axes([0.72, 0.94, 0.18, 0.045]), "Sample & Run")
+    tb_n    = TextBox(fig.add_axes([0.07, 0.94, 0.06, 0.045]), "pts ",  initial="8")
+    tb_seed = TextBox(fig.add_axes([0.19, 0.94, 0.06, 0.045]), "seed ", initial="0")
+    tb_obs  = TextBox(fig.add_axes([0.32, 0.94, 0.06, 0.045]), "obs ",  initial="5")
+    btn_obs = Button(fig.add_axes([0.42, 0.94, 0.16, 0.045]), "Obstacles")
+    btn_obs.on_clicked(on_obstacles)
+    btn_run = Button(fig.add_axes([0.62, 0.94, 0.20, 0.045]), "Sample & Run")
     btn_run.on_clicked(on_run)
 
     on_slider(None)   # draw the initial pose once

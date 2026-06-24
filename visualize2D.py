@@ -117,7 +117,7 @@ def launch():
     ax_t2 = fig.add_axes([0.25, 0.12, 0.55, 0.03])
     ax_t3 = fig.add_axes([0.25, 0.06, 0.55, 0.03])
 
-    s_theta1 = Slider(ax_t1, "theta1", -180, 180, valinit=0)
+    s_theta1 = Slider(ax_t1, "θ1 (deg)", -90, 90, valinit=0)
     s_theta2 = Slider(ax_t2, "theta2", -180, 180, valinit=180)
     s_theta3 = Slider(ax_t3, "theta3", -180, 180, valinit=-180)
 
